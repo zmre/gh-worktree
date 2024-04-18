@@ -47,3 +47,4 @@ Or to mess around with it locally, you can call the script directly or make your
 gh extension install .
 ```
 
+Note: this may require `jq` to be installed and in your path depending on what happens when you use the `--jq` parameter to `gh`. I could probably remove this requirement if someone asks nicely and PRs welcome.
