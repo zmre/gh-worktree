@@ -41,4 +41,9 @@ While it isn't listed, you have to install it like so:
 gh extension install zmre/gh-worktree
 ```
 
+Or to mess around with it locally, you can call the script directly or make your mods and then install them from the checked out `gh-worktree` like this:
+
+```bash
+gh extension install .
+```
 
