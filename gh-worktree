@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -e
+
+set_main_branch() {
+  # main=$(git branch --list --no-color --no-column --format '%(refname:lstrip=2)' |head -1)
+  # main=$(git rev-parse --abbrev-ref origin/HEAD)
+  # main="${main#*/}"
+  main=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)
+}
+
+sub_clone() {
+  repo=""
+  case "$1" in
+    -h|--help|"")
+      echo "Clones a repo ready to use worktrees in"
+      echo "Usage: gh worktree clone <repository> [<directory>]"
+      echo "  repository is OWNER/REPO; omit OWNER/ to default to current user"
+      echo "  directory defaults to REPO"
+      exit 0
+      ;;
+    *)
+      repo=$1
+      ;;
+  esac
+  directory=""
+  if [[ -z "$2" ]] ; then
+    directory="${repo#*/}"
+  else
+    directory="$2"
+  fi
+  mkdir "$directory"
+  cd "$directory"
+  gh repo clone "$repo" ./.bare -- --bare
+  echo "gitdir: ./.bare" > .git
+  set_main_branch
+  git worktree add "$main"
+  cd ..
+}
+
+sub_pr() {
+  prnum=""
+  case "$1" in
+    -h|--help)
+      echo "Checks out a PR as a worktree"
+      echo "Usage: gh worktree pr <number> [<directory>]"
+      echo "  directory defaults to ./pr-<number>"
+      exit 0
+      ;;
+    *)
+      prnum="$1"
+      ;;
+  esac
+
+
+
+  if [[ -z "$2" ]] ; then
+    directory="./pr-$prnum"
+  else
+    directory="$2"
+  fi
+  set_main_branch
+  git worktree add --checkout -f "$directory" "$main"
+  cd "$directory"
+  gh pr checkout "$prnum"
+  cd -
+}
+
+main_help() {
+  echo "Usage: gh worktree <subcommand> [options]"
+  echo "Subcommands:"
+  echo "    clone     Clone a github repo in a worktree dir"
+  echo "    pr        Checkout a PR"
+  echo ""
+  echo "For help with each subcommand run:"
+  echo "gh worktree <subcommand> --help"
+}
+
+if [[ -z "$1" ]] ; then
+    main_help
+    exit 0
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  clone)
+    shift
+    sub_clone "$@"
+    exit 0
+    ;;
+  pr)
+    shift
+    sub_pr "$@"
+    exit 0
+    ;;
+  ""|*)
+    main_help
+    exit 0
+    ;;
+  esac
+done
+
