@@ -102,9 +102,6 @@ update_js() {
 
 sub_add() {
   case "$1" in
-    # -v|--verbose)
-    #   set -x
-    #   shift
     -h|--help)
       echo "Checks out a branch (new or existing) as a worktree"
       echo "Usage: gh worktree add <branch-name> [<directory>]"
@@ -176,12 +173,92 @@ sub_add() {
   update_js
 }
 
+# Cleanup branches that have been merged in github
+# The normal gh-poi extension doesn't work on bare repo-based worktrees
+sub_poi() {
+  case "$1" in
+    -h|--help)
+      echo "Inspects local branches to see what might need cleanup; prompts before changes"
+      echo "Usage: gh worktree poi"
+      exit 0
+      ;;
+  esac
+
+
+  allmergedbranches=$(gh pr list -L 200 --state merged --search "status:success" -B main --json headRefName -t '{{range .}}{{.headRefName}}{{"\n"}}{{end}}')
+  allactiveworktreebranches=$(git worktree list  |awk '{print $3}' |sed 's/[][]//g')
+  alllocalbranches=$(git branch --format '%(refname)' -l |sed 's#refs/heads/##g')
+  set_main_branch
+
+  deletecandidates=()
+  warnorphans=()
+  warnworktrees=()
+
+  # Logic: for each local branch, see if it is in the merged branches list and if it is, make sure it isn't in the activeworktreebranches list and if all that is good, delete it
+  # but for now just say what you would do
+  for localbranch in $alllocalbranches ; do
+    if [[ $localbranch == $main ]]; then
+      # skip main/master
+      continue
+    fi
+    ISMERGED="no"
+    ISACTIVE="no"
+    
+    # does github report the branch merged?
+    if [[ $allmergedbranches =~ (^|[[:space:]])$localbranch($|[[:space:]]) ]]; then
+      ISMERGED="yes"
+    fi
+
+    # do we have a worktree with the branch?
+    if [[ $allactiveworktreebranches =~ (^|[[:space:]])$localbranch($|[[:space:]]) ]]; then
+      ISACTIVE="yes"
+    fi
+
+    if [[ "$ISMERGED" == "yes" && "$ISACTIVE" == "no" ]]; then
+        deletecandidates+=("$localbranch")
+    elif [[ "$ISMERGED" == "yes" && "$ISACTIVE" == "yes" ]]; then
+        warnworktrees+=("$localbranch")
+    elif [[ "$ISMERGED" == "no" && "$ISACTIVE" == "no" ]]; then
+      warnorphans+=("$localbranch")
+    fi
+  done
+
+  if [[ "${#warnorphans[@]}" -gt 0 ]]; then
+    echo "These branches seem to be locally abandoned:"
+    echo ""
+    echo "${warnorphans[@]}"
+    echo ""
+  fi
+
+  if [[ "${#warnworktrees[@]}" -gt 0 ]]; then
+    echo "These worktrees should likely be removed as their branches have been merged:"
+    echo ""
+    echo "${warnworktrees[@]}"
+    echo ""
+  fi
+
+  if [[ "${#deletecandidates[@]}" -gt 0 ]]; then
+    echo "These branches have been merged and can be cleaned up:"
+    echo ""
+    echo "${deletecandidates[@]}"
+    echo ""
+
+    read -p "Delete these branches? (y/n): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
+
+    for dbranch in "${deletecandidates[@]}"; do
+      git branch -D "$dbranch"
+    done
+  fi
+
+}
+
 main_help() {
   echo "Usage: gh worktree <subcommand> [options]"
   echo "Subcommands:"
   echo "    clone     Clone a github repo in a worktree dir"
   echo "    pr        Checkout a PR"
   echo "    add       Create or checkout a branch as a worktree"
+  echo "    poi       Cleanup branches that have been merged in github"
   echo ""
   echo "For help with each subcommand run:"
   echo "gh worktree <subcommand> --help"
@@ -207,6 +284,11 @@ while [ $# -gt 0 ]; do
   add)
     shift
     sub_add "$@"
+    exit 0
+    ;;
+  poi)
+    shift
+    sub_poi "$@"
     exit 0
     ;;
   ""|*)
