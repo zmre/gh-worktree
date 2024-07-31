@@ -48,3 +48,12 @@ gh extension install .
 ```
 
 Note: this may require `jq` to be installed and in your path depending on what happens when you use the `--jq` parameter to `gh`. I could probably remove this requirement if someone asks nicely and PRs welcome.
+
+## TODO
+
+* [x] Make worktree branching more efficient using script from https://github.com/llimllib/personal_code/blob/master/homedir/.local/bin/worktree
+  * Make it handle direnv and yarn/npm/pnpm
+  * Syntax should be something like `gh worktree add branch dir` and magic should ensue including that copy on write for the node_modules
+* [ ] Incorporate this into nix home-manager by fetching the github repo and then symlinking it to `~/.local/share/gh/extensions/gh-worktree`
+  * Currently I have other installed extensions but they don't get updated and are direct checkouts of repos. Also move those into nix.
+  * Maybe with `programs.gh.extensions` and maybe with flake inputs for that where packages don't exist?

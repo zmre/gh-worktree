@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -e
 
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+# YELLOW="\033[0;33m"
+CLEAR="\033[0m"
+
+echogreen() {
+  printf '\n%b%s%b\n\n' "$GREEN" "$1" "$CLEAR"
+}
+
+echored() {
+  printf '\n%b%s%b\n\n' "$RED" "$1" "$CLEAR"
+}
+
 set_main_branch() {
   # main=$(git branch --list --no-color --no-column --format '%(refname:lstrip=2)' |head -1)
   # main=$(git rev-parse --abbrev-ref origin/HEAD)
@@ -65,11 +78,110 @@ sub_pr() {
   cd -
 }
 
+# Copy on write cross platform
+# From https://github.com/llimllib/personal_code/blob/master/homedir/.local/bin/worktree
+cp_cow() {
+    if ! /bin/cp -Rc "$1" "$2"; then
+        if ! /bin/cp -R --reflink "$1" "$2"; then
+            if ! /bin/cp -R "$1" "$2"; then
+                echo "Unable to copy file $1 to $2 - folder may not exist"
+            fi
+        fi
+    fi
+}
+
+update_js() {
+  if [[ -f ./yarn.lock ]]; then
+    direnv exec . yarn
+  elif [[ -f pnpm.lock ]]; then
+    direnv exec . pnpm
+  elif [[ -f package.lock ]]; then
+    direnv exec . npm
+  fi
+}
+
+sub_add() {
+  case "$1" in
+    # -v|--verbose)
+    #   set -x
+    #   shift
+    -h|--help)
+      echo "Checks out a branch (new or existing) as a worktree"
+      echo "Usage: gh worktree add <branch-name> [<directory>]"
+      echo "  directory defaults branch name"
+      exit 0
+      ;;
+    *)
+      repo=$1
+      ;;
+  esac
+
+  directory=""
+  if [[ -z "$2" ]] ; then
+    directory="${repo#*/}"
+  else
+    directory="$2"
+  fi
+  set_main_branch
+
+  maindir=$(git worktree list |grep "\[$main\]" |awk '{print $1}')
+  echogreen "Updating main branch in $maindir"
+  cd "$maindir"
+  git pull
+  echogreen "Updating js in main branch if it exists"
+  update_js
+
+
+  FLAGS=""
+
+  # Following logic taken from https://github.com/llimllib/personal_code/blob/master/homedir/.local/bin/worktree
+  # if the branch exists locally:
+    if git for-each-ref --format='%(refname:lstrip=2)' refs/heads | grep -E "^$repo$" > /dev/null 2>&1; then
+      FLAGS=""
+    # if the branch exists on a remote:
+    elif git for-each-ref --format='%(refname:lstrip=3)' refs/remotes/origin | grep -E "^$repo$" > /dev/null 2>&1; then
+      FLAGS=""
+    else
+      # otherwise, create a new branch
+      FLAGS="-b"
+    fi
+
+  if [[ -f ../HEAD && -f ../packed-refs ]] ; then
+    cd ..
+  elif [[ -d ../.bare ]] ; then
+    cd ..
+  fi
+  echogreen "Change to worktree parent believed to be $(pwd)"
+
+  echogreen "Adding new worktree with command git worktree add $FLAGS \"$directory\" \"$repo\""
+  if ! git worktree add $FLAGS "$directory" "$repo"; then
+    echored "ERROR adding worktree"
+    exit 1
+  fi
+
+  if [ -d "$maindir/node_modules" ]; then
+    echogreen "Copying over node_modules dir to new worktree (copy on write)"
+    cp_cow "$maindir/node_modules" "$directory/node_modules"
+  fi
+  if [ -d "$maindir/.direnv" ]; then
+    echogreen "Copying over .direnv dir to new worktree (copy on write)"
+    cp_cow "$maindir/.direnv" "$directory/.direnv"
+  fi
+  if [ -f "$directory/.envrc" ]; then
+    echogreen "Allowing direnv"
+    direnv allow "$directory"
+  fi
+  cd "$directory"
+  echogreen "Updating node_modules in new branch if applicable"
+  update_js
+}
+
 main_help() {
   echo "Usage: gh worktree <subcommand> [options]"
   echo "Subcommands:"
   echo "    clone     Clone a github repo in a worktree dir"
   echo "    pr        Checkout a PR"
+  echo "    add       Create or checkout a branch as a worktree"
   echo ""
   echo "For help with each subcommand run:"
   echo "gh worktree <subcommand> --help"
@@ -90,6 +202,11 @@ while [ $# -gt 0 ]; do
   pr)
     shift
     sub_pr "$@"
+    exit 0
+    ;;
+  add)
+    shift
+    sub_add "$@"
     exit 0
     ;;
   ""|*)
