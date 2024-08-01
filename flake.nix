@@ -28,7 +28,6 @@
             src = ./.;
             buildInputs = dependencies;
             nativeBuildInputs = [pkgs.makeWrapper];
-            phases = ["installPhase"];
             installPhase = ''
               install -D -m644 "$src/README.md" "$out/README.md"
               install -D -m755 "$src/gh-worktree" "$out/bin/gh-worktree"
