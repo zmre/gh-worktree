@@ -197,7 +197,7 @@ sub_poi() {
   # Logic: for each local branch, see if it is in the merged branches list and if it is, make sure it isn't in the activeworktreebranches list and if all that is good, delete it
   # but for now just say what you would do
   for localbranch in $alllocalbranches ; do
-    if [[ $localbranch == $main ]]; then
+    if [[ "$localbranch" == "$main" ]]; then
       # skip main/master
       continue
     fi
@@ -243,7 +243,7 @@ sub_poi() {
     echo "${deletecandidates[@]}"
     echo ""
 
-    read -p "Delete these branches? (y/n): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
+    read -p -r "Delete these branches? (y/n): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
 
     for dbranch in "${deletecandidates[@]}"; do
       git branch -D "$dbranch"
