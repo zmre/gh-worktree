@@ -1,5 +1,6 @@
 {
   inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
   };
   outputs = {
@@ -22,10 +23,17 @@
         binPath = pkgs.lib.makeBinPath dependencies;
       in rec {
         packages = {
+          default = packages.gh-worktree;
           gh-worktree = pkgs.stdenvNoCC.mkDerivation {
             pname = "gh-worktree";
             version = "0.1.0";
-            src = ./.;
+            src = pkgs.lib.fileset.toSource {
+              root = ./.;
+              fileset = pkgs.lib.fileset.unions [
+                ./gh-worktree
+                ./README.md
+              ];
+            };
             buildInputs = dependencies;
             nativeBuildInputs = [pkgs.makeWrapper];
             installPhase = ''
@@ -35,11 +43,10 @@
             postFixup = ''
               wrapProgram "$out/bin/gh-worktree" --prefix PATH : "${binPath}"
             '';
+            meta.mainProgram = "gh-worktree";
           };
         };
-        defaultPackage = packages.gh-worktree;
-
-        devShell = pkgs.mkShell {
+        devShells.default = pkgs.mkShell {
           buildInputs = dependencies;
         };
       }
