@@ -21,6 +21,60 @@ set_main_branch() {
   main=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)
 }
 
+# Absolute path of the shared git dir (the .bare dir in a worktree layout)
+git_common_dir() {
+  local d
+  d=$(git rev-parse --git-common-dir) || return 1
+  (cd "$d" && pwd -P)
+}
+
+# Prints the worktree directory that has $1 checked out.
+#
+# Parses --porcelain rather than the human-readable listing: the columns in
+# `git worktree list` are ambiguous (paths with spaces, "prunable" suffixes),
+# and more importantly the bare repo itself shows up as a normal worktree
+# holding [main] whenever core.bare has been unset on it. Grepping for
+# "[main]" then matched two lines and produced a two-line directory name.
+find_worktree_for_branch() {
+  local want="refs/heads/$1"
+  local gitdir wt branch bare prunable
+  gitdir=$(git_common_dir)
+
+  wt="" branch="" bare="" prunable=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt="${line#worktree }" ;;
+      "branch "*) branch="${line#branch }" ;;
+      "bare") bare=1 ;;
+      "prunable"*) prunable=1 ;;
+      "")
+        # blank line terminates a record; decide whether it is the one we want
+        if [[ -z "$bare" && -z "$prunable" && "$branch" == "$want" ]] &&
+          [[ "$(cd "$wt" 2>/dev/null && pwd -P)" != "$gitdir" ]]; then
+          printf '%s\n' "$wt"
+          return 0
+        fi
+        wt="" branch="" bare="" prunable=""
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+
+  return 1
+}
+
+# A .bare dir with core.bare=false is what makes it masquerade as a worktree.
+# We cope with it above, but tell the user so they can straighten the repo out.
+warn_if_bare_misconfigured() {
+  local gitdir
+  gitdir=$(git_common_dir) || return 0
+  [[ "$(basename "$gitdir")" == ".bare" ]] || return 0
+  [[ "$(git --git-dir="$gitdir" config --get core.bare || true)" == "true" ]] && return 0
+
+  echored "WARNING: $gitdir has core.bare=false, so git lists it as a worktree of its own branch."
+  echo "  Worked around, but fix it with:  git --git-dir=$gitdir config core.bare true"
+  echo ""
+}
+
 sub_clone() {
   repo=""
   case "$1" in
@@ -121,7 +175,12 @@ sub_add() {
   fi
   set_main_branch
 
-  maindir=$(git worktree list |grep "\[$main\]" |awk '{print $1}')
+  warn_if_bare_misconfigured
+
+  if ! maindir=$(find_worktree_for_branch "$main"); then
+    echored "ERROR: no worktree has the $main branch checked out"
+    exit 1
+  fi
   echogreen "Updating main branch in $maindir"
   cd "$maindir"
   git pull
@@ -143,11 +202,9 @@ sub_add() {
       FLAGS="-b"
     fi
 
-  if [[ -f ../HEAD && -f ../packed-refs ]] ; then
-    cd ..
-  elif [[ -d ../.bare ]] ; then
-    cd ..
-  fi
+  # New worktrees go alongside the main one, whether its sibling git dir is a
+  # .bare dir or the worktrees live inside the git dir itself.
+  cd "$(dirname "$maindir")"
   echogreen "Change to worktree parent believed to be $(pwd)"
 
   echogreen "Adding new worktree with command git worktree add $FLAGS \"$directory\" \"$repo\""
@@ -186,7 +243,7 @@ sub_poi() {
 
 
   allmergedbranches=$(gh pr list -L 200 --state merged --search "status:success" -B main --json headRefName -t '{{range .}}{{.headRefName}}{{"\n"}}{{end}}')
-  allactiveworktreebranches=$(git worktree list  |awk '{print $3}' |sed 's/[][]//g')
+  allactiveworktreebranches=$(git worktree list --porcelain |sed -n 's#^branch refs/heads/##p')
   alllocalbranches=$(git branch --format '%(refname)' -l |sed 's#refs/heads/##g')
   set_main_branch
 
@@ -243,7 +300,7 @@ sub_poi() {
     echo "${deletecandidates[@]}"
     echo ""
 
-    read -p -r "Delete these branches? (y/n): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
+    read -r -p "Delete these branches? (y/n): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
 
     for dbranch in "${deletecandidates[@]}"; do
       git branch -D "$dbranch"
